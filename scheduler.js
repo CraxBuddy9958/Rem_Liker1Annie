@@ -15,8 +15,8 @@ const fs = require('fs');
 // ============================================
 // ⚙️ CONFIGURATION - SET YOUR LAUNCH TIME HERE
 // ============================================
-const LAUNCH_HOUR_IST = 23;      // 23 = 11 PM IST
-const LAUNCH_MINUTE_IST = 36;    // Minutes (0-59)
+const LAUNCH_HOUR_IST = 15;      // 23 = 11 PM IST
+const LAUNCH_MINUTE_IST = 53;    // Minutes (0-59)
 
 // ============================================
 // CONSTANTS
