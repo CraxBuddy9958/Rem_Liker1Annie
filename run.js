@@ -22,7 +22,9 @@ const HEARTBEAT_MS = 60 * 1000;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const WATCHDOG_INTERVAL_MS = 30 * 1000;
 const MAX_RESTARTS_PER_ACCOUNT = 5;
-const SCRIPTS_FOLDER = path.join(__dirname, 'userscripts');
+
+// ✅ FIX: Use root directory instead of 'userscripts' subfolder
+const SCRIPTS_FOLDER = __dirname;
 
 function sleep(ms) { 
     return new Promise(resolve => setTimeout(resolve, ms)); 
@@ -85,12 +87,14 @@ async function runAccount(browser, account) {
     // LOAD SCRIPTS
     // ============================================
     console.log('[runner] 📂 Loading userscripts...');
-    const step1Script = loadScript('step1_v3.js');      // Fetch link & redirect
+    
+    // ✅ FIX: Use correct filename with uppercase 'V' to match actual file
+    const step1Script = loadScript('step1_V3.js');      // Fetch link & redirect
     const step2Script = loadScript('step2_v3.js');      // Like & redirect
     const autoReloadScript = loadScript('auto_reload_v2.js');
     
     console.log('[runner] ✅ Scripts loaded:');
-    console.log(`   - step1_v3.js: ${step1Script ? '✓' : '✗'}`);
+    console.log(`   - step1_V3.js: ${step1Script ? '✓' : '✗'}`);
     console.log(`   - step2_v3.js: ${step2Script ? '✓' : '✗'}`);
     console.log(`   - auto_reload_v2.js: ${autoReloadScript ? '✓' : '✗'}`);
 
