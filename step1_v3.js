@@ -1,4 +1,4 @@
-// userscripts/step1_v3.js - Step 1: Fetch Link, Remove, Redirect
+// userscripts/step1_V3.js - Step 1: Fetch Link from Firebase & Redirect
 (function() {
     'use strict';
 
@@ -9,122 +9,160 @@
     }
     window.__step1Running = true;
 
+    console.log('[Step1] 🚀 Starting fetch & redirect process...');
+
+    // ============================================
+    // CONFIGURATION
+    // ============================================
     const DB_URL = "https://craxlinks-bb690-default-rtdb.firebaseio.com/links.json";
+    const REDIRECT_DELAY = 3000;  // 3 seconds before redirect
 
-    // Only run on pages that are NOT craxpro thread pages
-    if (window.location.href.includes("craxpro.to/threads/")) {
-        console.log("[Step1] On thread page — Step 1 will NOT run here.");
-        window.__step1Running = false;
-        return;
-    }
-
-    // Also skip if we're on the post-thread page (that's for creating threads)
-    if (window.location.href.includes("craxpro.to/forums/") && window.location.href.includes("post-thread")) {
-        console.log("[Step1] On post-thread page — Step 1 will NOT run here.");
-        window.__step1Running = false;
-        return;
-    }
-
-    console.log("[Step1] Running Step-1 script…");
-
-    // Fetch with fallback for Puppeteer context (handles CORS issues)
-    async function fetchWithFallback(url, options = {}) {
-        // Try regular fetch first
+    // Store used links in sessionStorage to avoid repeats
+    function getUsedLinks() {
         try {
-            const r = await fetch(url, options);
-            return r;
+            const stored = sessionStorage.getItem('__usedLinks');
+            return stored ? JSON.parse(stored) : [];
         } catch (e) {
-            console.log('[Step1] Regular fetch failed, trying __FETCH_PROXY');
+            return [];
         }
-
-        // Fallback to Puppeteer's exposed function
-        if (typeof window.__FETCH_PROXY === 'function') {
-            try {
-                const text = await window.__FETCH_PROXY(url);
-                
-                // Handle PUT requests
-                if (options.method === 'PUT') {
-                    return {
-                        ok: true,
-                        json: async () => JSON.parse(text)
-                    };
-                }
-                
-                return {
-                    ok: true,
-                    text: async () => text,
-                    json: async () => JSON.parse(text)
-                };
-            } catch (e) {
-                console.error('[Step1] __FETCH_PROXY failed:', e);
-            }
-        }
-
-        throw new Error('No fetch method available');
     }
 
-    async function processLink() {
+    function saveUsedLink(link) {
         try {
-            console.log("[Step1] Fetching link list from Firebase…");
+            const used = getUsedLinks();
+            used.push(link);
+            sessionStorage.setItem('__usedLinks', JSON.stringify(used));
+        } catch (e) {
+            console.error('[Step1] Error saving used link:', e);
+        }
+    }
 
-            let response = await fetchWithFallback(DB_URL);
-            let textData = await response.json();
+    // ============================================
+    // FETCH LINK FROM FIREBASE
+    // ============================================
+    async function fetchAndRedirect() {
+        try {
+            console.log('[Step1] 📡 Fetching links from Firebase...');
 
-            if (!textData || textData.trim() === "") {
-                console.log("[Step1] ❌ No links found in database.");
-                return;
-            }
-
-            console.log("[Step1] Raw data:", textData);
-
-            // Split by spaces (DB uses space-separated links)
-            let links = textData.trim().split(/\s+/);
-
-            if (links.length === 0) {
-                console.log("[Step1] ❌ No links parsed.");
-                return;
-            }
-
-            let firstLink = links[0];
-            console.log("[Step1] First link:", firstLink);
-
-            // Validate the link
-            if (!firstLink.startsWith('http')) {
-                console.log("[Step1] ❌ Invalid link format:", firstLink);
-                return;
-            }
-
-            // Remove ONLY the first link
-            links.shift();
-            let updatedText = links.join(" ");
-
-            console.log("[Step1] Updating Firebase… removing first link…");
-
-            await fetchWithFallback(DB_URL, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(updatedText)
+            const response = await fetch(DB_URL, {
+                cache: 'no-cache',
+                headers: {
+                    'Accept': 'text/plain,*/*'
+                }
             });
 
-            console.log("[Step1] ✔ Link removed from Firebase.");
-            console.log("[Step1] ✔ Remaining links count:", links.length);
+            if (!response.ok) {
+                console.error('[Step1] ❌ Failed to fetch DB. Status:', response.status);
+                return;
+            }
 
-            console.log("[Step1] Redirecting in 3 seconds…");
-            setTimeout(() => {
-                console.log("[Step1] Redirecting now →", firstLink);
-                window.location.href = firstLink;
-            }, 3000);
+            const data = await response.text();
+            console.log('[Step1] 📥 Raw data received');
 
-        } catch (err) {
-            console.error("[Step1] ERROR:", err);
-            // Retry after 5 seconds on error
+            // Parse data - handle both string and JSON formats
+            let links = [];
+            try {
+                const parsed = JSON.parse(data);
+                if (typeof parsed === 'string') {
+                    links = parsed.trim().split(/\s+/);
+                } else if (Array.isArray(parsed)) {
+                    links = parsed;
+                } else if (parsed && typeof parsed === 'object') {
+                    // Handle object format {link1: true, link2: true}
+                    links = Object.keys(parsed).map(key => {
+                        // If value is the link itself
+                        if (typeof parsed[key] === 'string') {
+                            return parsed[key];
+                        }
+                        // If key is the link
+                        return key;
+                    }).filter(link => link.startsWith('http'));
+                }
+            } catch (e) {
+                // If not JSON, treat as whitespace-separated string
+                links = data.trim().split(/\s+/);
+            }
+
+            if (!links || links.length === 0) {
+                console.log('[Step1] ⚠️ No links found in DB');
+                return;
+            }
+
+            console.log(`[Step1] 📋 Found ${links.length} total links`);
+
+            // Get used links
+            const usedLinks = getUsedLinks();
+            console.log(`[Step1] 📝 ${usedLinks.length} links already used this session`);
+
+            // Find first unused link
+            let targetLink = null;
+            for (const link of links) {
+                if (!link || usedLinks.includes(link)) {
+                    continue;
+                }
+                targetLink = link;
+                break;
+            }
+
+            if (!targetLink) {
+                console.log('[Step1] ⚠️ No unused links available - all links processed');
+                console.log('[Step1] ℹ️ Clearing used links history for fresh start...');
+                sessionStorage.removeItem('__usedLinks');
+                return;
+            }
+
+            console.log(`[Step1] ✅ Found target link: ${targetLink}`);
+
+            // Mark as used locally
+            saveUsedLink(targetLink);
+
+            // ============================================
+            // DELETE LINK FROM FIREBASE
+            // ============================================
+            try {
+                console.log('[Step1] 🗑️ Removing link from Firebase...');
+                
+                const deleteResponse = await fetch(DB_URL);
+                if (deleteResponse.ok) {
+                    const dbData = await deleteResponse.json();
+                    
+                    if (dbData && typeof dbData === 'object' && !Array.isArray(dbData)) {
+                        // Find and delete the specific key
+                        for (const [key, value] of Object.entries(dbData)) {
+                            if (value === targetLink || 
+                                (typeof value === 'object' && value.url === targetLink) ||
+                                (typeof value === 'string' && value.includes(targetLink))) {
+                                await fetch(`https://craxlinks-bb690-default-rtdb.firebaseio.com/links/${key}.json`, {
+                                    method: 'DELETE'
+                                });
+                                console.log(`[Step1] 🗑️ Deleted key: ${key}`);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('[Step1] ⚠️ Could not delete from Firebase:', e);
+            }
+
+            // ============================================
+            // REDIRECT TO LINK
+            // ============================================
+            console.log(`[Step1] ⏳ Redirecting in ${REDIRECT_DELAY/1000} seconds...`);
+            
             setTimeout(() => {
-                window.__step1Running = false;
-            }, 5000);
+                console.log(`[Step1] → Redirecting to: ${targetLink}`);
+                window.location.href = targetLink;
+            }, REDIRECT_DELAY);
+
+        } catch (error) {
+            console.error('[Step1] 💥 Error:', error.message);
         }
     }
 
-    // Run Step-1 with small delay for page to settle
-    setTimeout(processLink, 1000);
+    // ============================================
+    // START EXECUTION
+    // ============================================
+    setTimeout(fetchAndRedirect, 1000);
 
 })();
